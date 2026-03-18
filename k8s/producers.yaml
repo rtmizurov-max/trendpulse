@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hackernews-producer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hackernews-producer
+  template:
+    metadata:
+      labels:
+        app: hackernews-producer
+    spec:
+      hostNetwork: true
+      dnsPolicy: None
+      dnsConfig:
+        nameservers:
+          - 8.8.8.8
+          - 8.8.4.4
+      containers:
+      - name: hackernews-producer
+        image: docker.io/library/trendpulse:latest
+        imagePullPolicy: Never
+        command: ["python3", "producers/hackernews_producer.py"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rss-producer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rss-producer
+  template:
+    metadata:
+      labels:
+        app: rss-producer
+    spec:
+      hostNetwork: true
+      dnsPolicy: None
+      dnsConfig:
+        nameservers:
+          - 8.8.8.8
+          - 8.8.4.4
+      containers:
+      - name: rss-producer
+        image: docker.io/library/trendpulse:latest
+        imagePullPolicy: Never
+        command: ["python3", "producers/rss_producer.py"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: consumer
+  template:
+    metadata:
+      labels:
+        app: consumer
+    spec:
+      hostNetwork: true
+      dnsPolicy: None
+      dnsConfig:
+        nameservers:
+          - 8.8.8.8
+          - 8.8.4.4
+      containers:
+      - name: consumer
+        image: docker.io/library/trendpulse:latest
+        imagePullPolicy: Never
+        command: ["python3", "consumer/consumer.py"]
