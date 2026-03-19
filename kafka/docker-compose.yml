@@ -75,6 +75,7 @@ services:
       GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
     volumes:
       - grafana_data:/var/lib/grafana
+      - ~/trendpulse/grafana/provisioning:/etc/grafana/provisioning
 
   airflow:
     image: apache/airflow:2.8.0-python3.11

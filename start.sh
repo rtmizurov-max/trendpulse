@@ -5,6 +5,11 @@ sudo systemctl start docker
 sudo systemctl start k3s
 sleep 20
 
+# SELinux контексты для всех монтируемых папок
+sudo chcon -Rt svirt_sandbox_file_t ~/trendpulse/airflow/dags
+sudo chcon -Rt svirt_sandbox_file_t ~/trendpulse/clickhouse/config
+sudo chcon -Rt svirt_sandbox_file_t ~/trendpulse/grafana/provisioning
+
 cd ~/trendpulse/kafka && docker compose up -d
 echo "Waiting for infrastructure..."
 
@@ -27,8 +32,6 @@ docker exec kafka kafka-topics --create --if-not-exists --bootstrap-server local
 docker exec clickhouse clickhouse-client --query "CREATE DATABASE IF NOT EXISTS trendpulse"
 docker exec clickhouse clickhouse-client --query "CREATE TABLE IF NOT EXISTS trendpulse.hackernews (id UInt32, title String, score UInt32, url String, by String, time UInt32, num_comments UInt32, ingested_at DateTime DEFAULT now()) ENGINE = MergeTree() ORDER BY (time, id)"
 docker exec clickhouse clickhouse-client --query "CREATE TABLE IF NOT EXISTS trendpulse.rss_news (title String, link String, summary String, published String, source String, ingested_at DateTime DEFAULT now()) ENGINE = MergeTree() ORDER BY (ingested_at, source)"
-
-sudo chcon -Rt svirt_sandbox_file_t ~/trendpulse/airflow/dags
 
 echo "Installing mc in Airflow..."
 until docker exec airflow echo ok > /dev/null 2>&1; do
