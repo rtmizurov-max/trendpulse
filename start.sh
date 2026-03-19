@@ -8,14 +8,12 @@ sleep 20
 cd ~/trendpulse/kafka && docker compose up -d
 echo "Waiting for infrastructure..."
 
-# Ждём пока ClickHouse реально поднимется
 until curl -s http://localhost:8123/ping > /dev/null 2>&1; do
     echo "Waiting for ClickHouse..."
     sleep 5
 done
 echo "ClickHouse is ready"
 
-# Ждём пока Kafka реально поднимется
 until docker exec kafka kafka-topics --list --bootstrap-server localhost:9092 > /dev/null 2>&1; do
     echo "Waiting for Kafka..."
     sleep 5
@@ -32,12 +30,19 @@ docker exec clickhouse clickhouse-client --query "CREATE TABLE IF NOT EXISTS tre
 
 sudo chcon -Rt svirt_sandbox_file_t ~/trendpulse/airflow/dags
 
+echo "Installing mc in Airflow..."
+until docker exec airflow echo ok > /dev/null 2>&1; do
+    echo "Waiting for Airflow..."
+    sleep 5
+done
+docker exec -u root airflow bash -c "curl -o /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-amd64/mc && chmod +x /usr/local/bin/mc"
+echo "mc installed"
+
 echo "Building Docker image..."
 cd ~/trendpulse
 docker build --network host -t trendpulse:latest .
 docker save trendpulse:latest | sudo k3s ctr images import -
 
-# Ждём пока k3s поднимется
 until kubectl get nodes > /dev/null 2>&1; do
     echo "Waiting for Kubernetes..."
     sleep 5
