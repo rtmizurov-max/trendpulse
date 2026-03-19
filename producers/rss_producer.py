@@ -1,10 +1,13 @@
 import feedparser
 import json
 import time
+import os
 from kafka import KafkaProducer
 
+KAFKA_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
+
 producer = KafkaProducer(
-    bootstrap_servers='localhost:9092',
+    bootstrap_servers=KAFKA_SERVERS,
     value_serializer=lambda v: json.dumps(v).encode('utf-8')
 )
 
