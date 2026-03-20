@@ -1,11 +1,18 @@
 #!/bin/bash
 echo "Starting TrendPulse..."
 
+# Проверяем что пользователь в группе docker
+if ! groups | grep -q docker; then
+    echo "Adding user to docker group..."
+    sudo usermod -aG docker $USER
+    echo "Please run: newgrp docker && ~/trendpulse/start.sh"
+    exit 1
+fi
+
 sudo systemctl start docker
 sudo systemctl start k3s
 sleep 20
 
-# SELinux контексты для всех монтируемых папок
 sudo chcon -Rt svirt_sandbox_file_t ~/trendpulse/airflow/dags
 sudo chcon -Rt svirt_sandbox_file_t ~/trendpulse/clickhouse/config
 sudo chcon -Rt svirt_sandbox_file_t ~/trendpulse/grafana/provisioning
