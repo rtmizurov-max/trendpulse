@@ -1,148 +1,257 @@
-TrendPulse — Real-Time News Analytics Platform
+# TRENDPULSE — REAL-TIME NEWS ANALYTICS PLATFORM
 
-Платформа аналитики новостей в реальном времени. Система собирает данные с HackerNews и RSS лент, передаёт их через Apache Kafka, обрабатывает Python Consumer и сохраняет в ClickHouse. Grafana визуализирует тренды в реальном времени. Airflow оркестрирует ежедневные батчевые задачи. Все приложения задеплоены в Kubernetes, инфраструктура управляется через Docker Compose.
+**Платформа аналитики новостей в реальном времени**
 
-ВОЗМОЖНОСТИ
+TrendPulse — это полноценный Data Engineering проект, который собирает данные с HackerNews и RSS лент, передаёт их через Apache Kafka, обрабатывает Python Consumer и сохраняет в ClickHouse. Grafana визуализирует тренды в реальном времени, Airflow оркестрирует ежедневные батчевые задачи, а Kubernetes управляет приложениями. Вся инфраструктура поднимается одной командой.
 
-Extract: Сбор данных с HackerNews API и RSS лент (BBC, NYT, HackerNews RSS) каждые 60 секунд с автоматическим retry при сбоях
+---
 
-Streaming: Буферизация и передача данных через Apache Kafka с тремя топиками и партиционированием
+## Содержание
 
-Load: Идемпотентная запись в ClickHouse батчами по 5 сообщений, колоночное хранение для быстрых агрегаций
+- [Архитектура](#архитектура)
+- [Стек технологий](#стек-технологий)
+- [Структура проекта](#структура-проекта)
+- [Пайплайн данных](#пайплайн-данных)
+- [Быстрый старт](#быстрый-старт)
+- [Сервисы](#сервисы)
+- [Airflow DAG](#airflow-dag)
+- [Kubernetes](#kubernetes)
+- [Планы](#планы)
 
-Orchestration: Ежедневные батчевые задачи через Apache Airflow — агрегации, очистка старых данных, дамп в MinIO
+---
 
-Analytics: Готовые Grafana дашборды — топ постов по скору, активность по часам, топ авторов, распределение по источникам
+## Архитектура
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     ИСТОЧНИКИ ДАННЫХ                         │
+│  HackerNews API    RSS Feeds (BBC, NYT)    Reddit API        │
+└────────────┬───────────────┬───────────────────┬────────────┘
+             │               │                   │
+             ▼               ▼                   ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      APACHE KAFKA                            │
+│   hackernews-posts    rss-news    reddit-posts               │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    PYTHON CONSUMER                           │
+│         Читает из Kafka, пишет в ClickHouse                  │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+             ┌────────────┴────────────┐
+             ▼                         ▼
+┌────────────────────┐     ┌──────────────────────┐
+│    CLICKHOUSE      │     │        MINIO          │
+│  Аналитическая БД  │     │      Data Lake        │
+└────────┬───────────┘     └──────────────────────┘
+         │
+         ▼
+┌─────────────────────┐
+│      GRAFANA        │
+│  Дашборды и тренды  │
+└─────────────────────┘
 
-Data Lake: Хранение сырых данных в MinIO — self-hosted S3-совместимое хранилище для переобработки
+AIRFLOW    — батчевые задачи каждую ночь в 00:00
+KUBERNETES — оркестрация producers и consumer
+DOCKER     — управление инфраструктурой
+```
 
-Infrastructure: Полная контейнеризация через Docker Compose и Kubernetes, запуск одной командой
+---
 
-ТЕХНОЛОГИЧЕСКИЙ СТЕК
+## Стек технологий
 
-Инфраструктура:
-- Apache Kafka + Zookeeper — брокер сообщений, топики: hackernews-posts, rss-news, reddit-posts, 3 партиции на топик
-- ClickHouse — аналитическая колоночная БД, движок MergeTree, оптимизирована для агрегаций
-- Apache Airflow — оркестрация батчевых задач, DAG trendpulse_daily запускается каждую ночь в 00:00
-- Grafana — визуализация данных из ClickHouse, плагин grafana-clickhouse-datasource
-- MinIO — Data Lake, self-hosted аналог AWS S3, хранение сырых данных в JSON формате
+| Компонент | Инструмент | Версия | Роль |
+|-----------|-----------|--------|------|
+| Брокер сообщений | Apache Kafka | 7.5.0 | Приём и хранение потока данных |
+| Координатор | Zookeeper | 7.5.0 | Управление кластером Kafka |
+| База данных | ClickHouse | latest | Аналитическое хранилище |
+| Оркестрация задач | Apache Airflow | 2.8.0 | Батчевые задачи по расписанию |
+| Визуализация | Grafana | latest | Дашборды в реальном времени |
+| Data Lake | MinIO | latest | S3-совместимое хранилище |
+| Контейнеры | Docker Compose | v2 | Управление инфраструктурой |
+| Kubernetes | k3s | v1.28.5 | Оркестрация приложений |
+| Язык | Python | 3.11 | Producers, Consumer, DAG |
 
-Приложения и оркестрация:
-- Kubernetes k3s — лёгкая версия Kubernetes для локального деплоя, оркестрирует producers и consumer
-- Docker Compose — управляет инфраструктурными сервисами в единой Docker сети
-- Python 3.11 — producers, consumer, Airflow DAG
+---
 
-АРХИТЕКТУРА
+## Структура проекта
+```
+trendpulse/
+│
+├── producers/
+│   ├── hackernews_producer.py   # Сбор данных с HackerNews Firebase API
+│   ├── rss_producer.py          # Парсинг RSS лент BBC, NYT, HackerNews
+│   └── reddit_producer.py       # Сбор данных с Reddit API (в разработке)
+│
+├── consumer/
+│   └── consumer.py              # Чтение из Kafka, запись в ClickHouse
+│
+├── airflow/
+│   └── dags/
+│       └── trendpulse_dag.py    # DAG с 4 задачами
+│
+├── kafka/
+│   └── docker-compose.yml       # Вся инфраструктура одним файлом
+│
+├── k8s/
+│   └── producers.yaml           # Kubernetes Deployment манифесты
+│
+├── grafana/
+│   ├── dashboard.json           # Экспорт дашборда (импортируется автоматически)
+│   └── provisioning/
+│       ├── datasources/
+│       │   └── clickhouse.yaml  # Автоматическое подключение ClickHouse
+│       └── dashboards/
+│           └── dashboards.yaml  # Автоматический импорт дашбордов
+│
+├── clickhouse/
+│   └── config/
+│       └── no-auth.xml          # Конфигурация пользователей ClickHouse
+│
+├── Dockerfile                   # Образ для Python приложений (python:3.11-slim)
+├── start.sh                     # Единая точка запуска всего проекта
+└── README.md
+```
 
-Инфраструктура (Docker Compose):
-   Zookeeper → Kafka → Kafka UI
-   ClickHouse
-   MinIO
-   Grafana
-   Airflow
+---
 
-Приложения (Kubernetes):
-   hackernews-producer — читает HackerNews API, пишет в Kafka
-   rss-producer        — читает RSS ленты, пишет в Kafka
-   reddit-producer     — читает Reddit API, пишет в Kafka (в разработке)
-   consumer            — читает из Kafka, пишет в ClickHouse
+## Пайплайн данных
+```
+1. INGESTION
+   Producers запускаются в Kubernetes и каждые 60 секунд опрашивают:
+   - HackerNews Firebase API → топ 30 постов
+   - RSS ленты BBC, NYT, HackerNews → новые статьи каждые 5 минут
 
-ПАЙПЛАЙН ДАННЫХ
+2. STREAMING
+   Каждое сообщение сериализуется в JSON и отправляется в Kafka топик:
+   - hackernews-posts (3 партиции)
+   - rss-news (3 партиции)
 
-1. Producers каждые 60 секунд опрашивают HackerNews API и RSS ленты
-2. Каждое сообщение сериализуется в JSON и отправляется в соответствующий Kafka топик
-3. Consumer читает из топиков hackernews-posts и rss-news, накапливает батч из 5 сообщений
-4. Батч вставляется в ClickHouse через HTTP интерфейс в формате TabSeparated
-5. Airflow DAG каждую ночь считает агрегации, выбирает топ постов и чистит данные старше 30 дней
-6. Grafana опрашивает ClickHouse и отображает актуальные данные на дашборде
+3. PROCESSING
+   Python Consumer читает из Kafka и накапливает батч из 5 сообщений.
+   Батч вставляется в ClickHouse через HTTP интерфейс в формате TabSeparated.
 
-БЫСТРЫЙ СТАРТ
+4. ORCHESTRATION
+   Airflow DAG запускается каждую ночь в 00:00 и выполняет:
+   - Подсчёт записей в базе
+   - Выборку топ-10 постов за день
+   - Дамп данных в MinIO (Data Lake)
+   - Очистку записей старше 30 дней
 
-Требования:
-- Docker и Docker Compose
-- k3s
-- Python 3.11+
+5. VISUALIZATION
+   Grafana подключается к ClickHouse и отображает:
+   - Топ постов по скору
+   - Активность по часам
+   - Топ авторов
+   - Распределение по источникам
+```
+
+---
+
+## Быстрый старт
+
+### Требования
+
+- Fedora / RHEL / CentOS (или любой Linux с systemd)
+- Docker и Docker Compose v2
+- k3s (Kubernetes)
 - kubectl
-- Git
+- Python 3.11+
+- 4GB RAM минимум
 
-Установка зависимостей:
+### Установка зависимостей
+```bash
+# Docker
+sudo dnf install -y docker
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+newgrp docker
 
-Docker:
-   sudo dnf install -y docker git
-   sudo systemctl enable --now docker
-   sudo usermod -aG docker $USER
-   newgrp docker
+# k3s
+curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik" sh -s - --write-kubeconfig-mode 644
 
-k3s:
-   curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik" sh -s - --write-kubeconfig-mode 644
+# kubectl настройка
+mkdir -p ~/.kube
+sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+sudo chown $USER ~/.kube/config
 
-kubectl конфиг:
-   mkdir -p ~/.kube
-   sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-   sudo chown $USER ~/.kube/config
+# SELinux бинарник k3s
+sudo chcon -t bin_t /usr/local/bin/k3s
 
-Python зависимости:
-   pip install kafka-python requests feedparser
+# k3s как системный сервис
+sudo systemctl enable k3s
+```
 
-Запуск проекта:
+### Запуск
+```bash
+git clone https://github.com/rtmizurov-max/trendpulse.git
+cd trendpulse
+chmod +x start.sh
+./start.sh
+```
 
-   git clone https://github.com/rtmizurov-max/trendpulse.git
-   cd trendpulse
-   chmod +x start.sh
-   ./start.sh
+Скрипт автоматически:
+- Запускает Docker и k3s
+- Применяет SELinux контексты
+- Поднимает все контейнеры через Docker Compose
+- Ждёт готовности ClickHouse и Kafka
+- Создаёт топики и таблицы
+- Собирает Docker образ и импортирует в k3s
+- Деплоит приложения в Kubernetes
 
-СЕРВИСЫ ПОСЛЕ ЗАПУСКА
+### Остановка
+```bash
+kubectl delete -f ~/trendpulse/k8s/producers.yaml
+sudo systemctl stop k3s
+cd ~/trendpulse/kafka && docker compose down
+```
 
-Kafka UI  — http://localhost:8080
-Grafana   — http://localhost:3000  (admin / trendpulse123)
-Airflow   — http://localhost:8082  (admin / admin)
-MinIO     — http://localhost:9001  (trendpulse / trendpulse123)
+---
 
-СТРУКТУРА ПРОЕКТА
+## Сервисы
 
-producers/
-   hackernews_producer.py   сбор данных с HackerNews Firebase API
-   rss_producer.py          парсинг RSS лент BBC, NYT, HackerNews
-   reddit_producer.py       сбор данных с Reddit API (в разработке)
+| Сервис | URL | Логин | Пароль |
+|--------|-----|-------|--------|
+| Kafka UI | http://localhost:8080 | — | — |
+| Grafana | http://localhost:3000 | admin | trendpulse123 |
+| Airflow | http://localhost:8082 | admin | admin |
+| MinIO | http://localhost:9001 | trendpulse | trendpulse123 |
 
-consumer/
-   consumer.py              чтение из Kafka и запись в ClickHouse
+Grafana автоматически подключается к ClickHouse и импортирует дашборд при первом запуске.
 
-airflow/
-   dags/
-      trendpulse_dag.py     DAG с задачами агрегации и очистки
+---
 
-kafka/
-   docker-compose.yml       вся инфраструктура одним файлом
+## Airflow DAG
 
-k8s/
-   producers.yaml           Kubernetes Deployment манифесты
+DAG `trendpulse_daily` содержит 4 задачи которые выполняются последовательно каждый день в полночь:
+```
+count_records → get_daily_top → dump_to_minio → cleanup_old_data
+```
 
-grafana/
-   dashboard.json           экспорт дашборда для импорта
+- `count_records` — подсчёт общего количества записей в ClickHouse
+- `get_daily_top` — выборка топ-10 постов по скору за текущий день
+- `dump_to_minio` — дамп таблиц hackernews и rss_news в MinIO в формате JSON с партиционированием по дате
+- `cleanup_old_data` — удаление записей старше 30 дней
 
-clickhouse/
-   config/
-      no-auth.xml           конфигурация пользователей ClickHouse
+---
 
-Dockerfile                  образ для Python приложений на python:3.11-slim
-start.sh                    единая точка запуска всего проекта
+## Kubernetes
 
-AIRFLOW DAG
+Приложения задеплоены в k3s через Deployment манифесты:
 
-DAG trendpulse_daily содержит три задачи которые выполняются последовательно каждый день в полночь:
+- `hackernews-producer` — 1 реплика, читает HackerNews API
+- `rss-producer` — 1 реплика, парсит RSS ленты
+- `consumer` — 1 реплика, читает Kafka и пишет в ClickHouse
 
-1. count_records      — подсчёт общего количества записей в ClickHouse
-2. get_daily_top      — выборка топ-10 постов по скору за текущий день
-3. cleanup_old_data   — удаление записей старше 30 дней
+Все поды используют `hostNetwork: true` для доступа к Kafka на хосте. При падении пода Kubernetes автоматически его перезапускает.
 
-ПЛАНЫ ПО РАЗВИТИЮ
+---
+
+## Планы
 
 - Reddit API интеграция (ожидает одобрения заявки на developers.reddit.com)
-- Дамп сырых данных в MinIO через Airflow с партиционированием по дате
 - Анализ тональности заголовков через HuggingFace transformers
 - Helm charts для полного деплоя всего стека в Kubernetes
 - Sentiment дашборд в Grafana
-
-Автор: rtmizurov-max
-Лицензия: MIT
+- Поддержка Ubuntu/Debian в start.sh
