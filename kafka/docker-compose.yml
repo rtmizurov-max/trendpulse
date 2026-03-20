@@ -46,7 +46,7 @@ services:
       - "9000:9000"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
-      - ~/trendpulse/clickhouse/config:/etc/clickhouse-server/users.d
+      - ${HOME}/trendpulse/clickhouse/config:/etc/clickhouse-server/users.d
     ulimits:
       nofile:
         soft: 262144
@@ -75,7 +75,7 @@ services:
       GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
     volumes:
       - grafana_data:/var/lib/grafana
-      - ~/trendpulse/grafana/provisioning:/etc/grafana/provisioning
+      - ${HOME}/trendpulse/grafana/provisioning:/etc/grafana/provisioning
 
   airflow:
     image: apache/airflow:2.8.0-python3.11
@@ -91,7 +91,7 @@ services:
       AIRFLOW__WEBSERVER__SECRET_KEY: trendpulse123
     volumes:
       - airflow_data:/opt/airflow
-      - ~/trendpulse/airflow/dags:/opt/airflow/dags
+      - ${HOME}/trendpulse/airflow/dags:/opt/airflow/dags
     command: bash -c "pip install minio requests && airflow db migrate && airflow users create --username admin --password admin --firstname Admin --lastname Admin --role Admin --email admin@example.com; airflow scheduler & airflow webserver"
 
 volumes:
